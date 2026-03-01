@@ -1,0 +1,170 @@
+import os
+import win32gui
+import win32con
+import time
+import keyboard
+import pydirectinput
+import pyautogui  
+import threading
+
+is_running = False
+image_dir = ""
+
+def get_roblox_hwnds():
+    hwnds = []
+    def enum_windows_proc(hwnd, lParam):
+        if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd) == "Roblox":
+            hwnds.append(hwnd)
+    win32gui.EnumWindows(enum_windows_proc, 0)
+    return hwnds
+
+def force_foreground(hwnd):
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+
+def afk_farm_loop():
+    global is_running
+    account_states = {}
+    phase2_printed = False
+    
+    while is_running:
+        hwnds = get_roblox_hwnds()
+        
+        if not hwnds:
+            print("Status: Waiting for Roblox... (0 detected)")
+            time.sleep(2)
+            continue
+            
+        for hwnd in hwnds:
+            if hwnd not in account_states: account_states[hwnd] = False
+                
+        needs_clearing = [h for h in hwnds if not account_states[h]]
+        
+        if needs_clearing:
+            phase2_printed = False
+            print(f"\n[*] Clearing Popups ({len(needs_clearing)}/{len(hwnds)} accounts need clearing)")
+            for hwnd in needs_clearing:
+                if not is_running: break
+                force_foreground(hwnd)
+                time.sleep(0.4) 
+                
+                try:
+                    pyautogui.locateCenterOnScreen(rf'{image_dir}\Playerlist Close.png', confidence=0.90, grayscale=True)
+                    pydirectinput.press('tab')
+                    time.sleep(0.1)
+                except pyautogui.ImageNotFoundException: pass
+                
+                timeout = time.time() + 10
+                while time.time() < timeout:
+                    try:
+                        daily_x = pyautogui.locateCenterOnScreen(rf'{image_dir}\Daily Login Close.png', confidence=0.80, grayscale=True)
+                        pydirectinput.moveTo(int(daily_x.x), int(daily_x.y))
+                        pydirectinput.move(2, 2)
+                        time.sleep(0.01)
+                        pydirectinput.move(-2, -2)
+                        time.sleep(0.05)
+                        pydirectinput.mouseDown()
+                        time.sleep(0.05)
+                        pydirectinput.mouseUp()
+                        time.sleep(0.05)
+                        pydirectinput.mouseDown()
+                        time.sleep(0.05)
+                        pydirectinput.mouseUp()
+                        time.sleep(0.2)
+                    except pyautogui.ImageNotFoundException:
+                        break
+                
+                account_states[hwnd] = True
+        else:
+            master_hwnd = hwnds[0]
+            force_foreground(master_hwnd)
+            
+            if not phase2_printed:
+                print(f"\nStatus: Waiting for match to end... ({len(hwnds)} accounts waiting)")
+                phase2_printed = True
+                
+            try:
+                rematch = pyautogui.locateCenterOnScreen(rf'{image_dir}\Rematch Button.png', confidence=0.75, grayscale=True)
+                print("\n[!] Rematch detected, clicking for the next 15 seconds...")
+                end_time = time.time() + 15
+                rematch_coords = {}
+                
+                while time.time() < end_time:
+                    for hwnd in hwnds:
+                        if not is_running: return
+                        force_foreground(hwnd)
+                        
+                        if hwnd not in rematch_coords:
+                            time.sleep(0.2)
+                            try:
+                                local_rm = pyautogui.locateCenterOnScreen(rf'{image_dir}\Rematch Button.png', confidence=0.75, grayscale=True)
+                                rematch_coords[hwnd] = (local_rm.x, local_rm.y)
+                            except pyautogui.ImageNotFoundException:
+                                continue
+                        else:
+                            time.sleep(0.05)
+                        
+                        if hwnd in rematch_coords:
+                            rm_x, rm_y = rematch_coords[hwnd]
+                            pydirectinput.moveTo(int(rm_x), int(rm_y))
+                            pydirectinput.move(2, 2)
+                            pydirectinput.move(-2, -2)
+                            
+                            for _ in range(2):
+                                pydirectinput.mouseDown()
+                                time.sleep(0.01)
+                                pydirectinput.mouseUp()
+                                time.sleep(0.01)
+                                    
+                print("\n[*] Loop done, resetting loop.")
+                for hwnd in hwnds: account_states[hwnd] = False
+                        
+            except pyautogui.ImageNotFoundException:
+                pass
+                
+        time.sleep(0.5)
+
+def toggle_macro():
+    global is_running
+    is_running = not is_running
+    
+    if is_running:
+        print("\n[+] Holy Grail DUELS. Press CTRL+H to stop it.")
+        threading.Thread(target=afk_farm_loop, daemon=True).start()
+    else:
+        print("\n[-] Macro Stopped.")
+
+if __name__ == "__main__":
+    pydirectinput.FAILSAFE = False
+    print("==============================")
+    print("      Holy Grail DUELS V1       ")
+    print("==============================\n")
+    required_images = ["Playerlist Close.png", "Daily Login Close.png", "Rematch Button.png"]
+    
+    while True:
+        image_dir = input("Paste the path of your Holy Grail DUELS folder:\n> ").strip().strip('"').strip("'")
+        missing_images = []
+        for img in required_images:
+            if not os.path.isfile(os.path.join(image_dir, img)):
+                missing_images.append(img)
+                
+        if missing_images:
+            print("\n[ERROR] The following required images were not found in that folder:")
+            for missing in missing_images:
+                print(f"  - {missing}")
+            print("Please check the path and try again.\n")
+        else:
+            print("\n[+] All images successfully verified!")
+            break
+            
+    print("\nLooking for images in:", image_dir)
+    print("------------------------------")
+    print("Press CTRL+H to Start or Stop the macro.")
+    print("Press CTRL+G to exit completely.")
+    
+    keyboard.add_hotkey('ctrl+h', toggle_macro)
+    keyboard.wait('ctrl+g')
