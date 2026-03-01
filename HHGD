@@ -146,7 +146,7 @@ if __name__ == "__main__":
     required_images = ["Playerlist Close.png", "Daily Login Close.png", "Rematch Button.png"]
     
     while True:
-        image_dir = input("Paste the path of your Holy Grail DUELS folder:\n> ").strip().strip('"').strip("'")
+        image_dir = input("Paste the path of your Holy Grail DUELS or LOADER folder:\n> ").strip().strip('"').strip("'")
         missing_images = []
         for img in required_images:
             if not os.path.isfile(os.path.join(image_dir, img)):
