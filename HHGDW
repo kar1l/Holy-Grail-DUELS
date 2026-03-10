@@ -97,13 +97,13 @@ def find_image_in_hwnd(hwnd, template_name, threshold=0.75):
 
 def set_main_window():
     global main_hwnd, alt_hwnds
-    print("\n[!] Please click on your MAIN Roblox window to focus it, then press F1.")
+    print("\n[!] Click on your main account window, then press F1.")
     while not keyboard.is_pressed('F1'):
         time.sleep(0.1)
         
     main_hwnd = win32gui.GetForegroundWindow()
     if win32gui.GetWindowText(main_hwnd) != "Roblox":
-        print("[ERROR] The active window is not named 'Roblox'. Please try again.")
+        print("[ERROR] Active window is not named 'Roblox'. Please try again.")
         main_hwnd = None
         return False
         
@@ -170,7 +170,7 @@ def afk_farm_loop():
         
         if needs_clearing:
             phase2_printed = False
-            print(f"\n[*] Clearing Popups ({len(needs_clearing)}/{len(hwnds)} accs)")
+            print(f"\n[~] Clearingpopups for {len(needs_clearing)} of {len(hwnds)} accounts")
             for hwnd in needs_clearing:
                 if not is_running: break
                 force_foreground(hwnd)
@@ -194,11 +194,11 @@ def afk_farm_loop():
             force_foreground(main_hwnd)
             
             if not phase2_printed:
-                print(f"\nStatus: Waiting for match end ({len(hwnds)} accs)")
+                print(f"\n[~] Waiting for the match to end on {len(hwnds)} accounts")
                 phase2_printed = True
                 
             if find_image_in_hwnd(main_hwnd, 'Rematch Button.png', threshold=0.75):
-                print("\n[!] Rematch detected. Clicking 15s...")
+                print("\n[+] Found Rematch, clicking for 15 seconds...")
                 end_time = time.time() + 15
                 rematch_coords = {}
                 
@@ -220,10 +220,10 @@ def afk_farm_loop():
                         if hwnd in rematch_coords:
                             click_in_hwnd(hwnd, rematch_coords[hwnd], double_click=True)
                                     
-                print("\n[*] Loop done, resetting.")
+                print("\n[-] Done.")
                 pydirectinput.moveTo(100, 100)
                 
-                print("[*] Waiting for Rematch button to disappear...")
+                print("[~] Waiting for the rematch to disappear")
                 force_foreground(main_hwnd)
                 while find_image_in_hwnd(main_hwnd, 'Rematch Button.png', threshold=0.75) and is_running:
                     time.sleep(0.5)
@@ -234,10 +234,14 @@ def afk_farm_loop():
                 if game_mode == "DS":
                     spam_q_f()
                 elif game_mode == "SOD":
+                    if not phase2_printed:
+                        print(f"\n[~] Keeping {len(hwnds)} accounts active until SOD appears")
+                        phase2_printed = True
+                        
                     sod_coords = find_image_in_hwnd(main_hwnd, 'SOD.png', threshold=0.75)
                     
                     if sod_coords:
-                        print("\n[!] SOD detected. Clicking 5 times rapidly...")
+                        print("\n[+] Found SOD, clicking it rapidly...")
                         
                         screen_x, screen_y = win32gui.ClientToScreen(main_hwnd, (int(sod_coords[0]), int(sod_coords[1])))
                         pydirectinput.moveTo(screen_x, screen_y)
@@ -250,7 +254,7 @@ def afk_farm_loop():
                             pydirectinput.mouseUp()
                             time.sleep(0.025)
                             
-                        print("[*] Waiting 2 seconds before resuming.")
+                        print("[-] Taking a 2-second breather")
                         pydirectinput.moveTo(100, 100)
                         time.sleep(2)
                     else:
@@ -294,12 +298,12 @@ if __name__ == "__main__":
                 missing_images.append(img)
                 
         if missing_images:
-            print("\n[ERROR] The following required images were not found in that folder:")
+            print("\n[ERROR] The following images were not found in that folder:")
             for missing in missing_images:
                 print(f"  - {missing}")
             print("Please check the path and try again.\n")
         else:
-            print("\n[+] All required images verified.")
+            print("\n[+] All images found.")
             break
             
     print("\nLooking for images in:", image_dir)
