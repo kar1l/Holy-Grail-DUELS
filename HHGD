@@ -1,14 +1,22 @@
 import os
+import cv2
+import numpy as np
 import win32gui
+import win32ui
 import win32con
 import time
 import keyboard
 import pydirectinput
 import pyautogui  
 import threading
+import ctypes
+from pynput.keyboard import Controller, KeyCode
 
 is_running = False
 image_dir = ""
+main_hwnd = None
+alt_hwnds = []
+kb_controller = Controller()
 
 def get_roblox_hwnds():
     hwnds = []
@@ -26,19 +34,134 @@ def force_foreground(hwnd):
     except Exception:
         pass
 
+def capture_window(hwnd):
+    try:
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        width = right - left
+        height = bottom - top
+        
+        if width <= 0 or height <= 0:
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            width = right - left
+            height = bottom - top
+            if width <= 0 or height <= 0:
+                 return None
+
+        hwndDC = win32gui.GetWindowDC(hwnd)
+        mfcDC  = win32ui.CreateDCFromHandle(hwndDC)
+        saveDC = mfcDC.CreateCompatibleDC()
+
+        saveBitMap = win32ui.CreateBitmap()
+        saveBitMap.CreateCompatibleBitmap(mfcDC, width, height)
+        saveDC.SelectObject(saveBitMap)
+
+        result = ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 3)
+        if result != 1:
+            result = ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 0)
+
+        bmpinfo = saveBitMap.GetInfo()
+        bmpstr = saveBitMap.GetBitmapBits(True)
+        img = np.frombuffer(bmpstr, dtype='uint8')
+        img.shape = (bmpinfo['bmHeight'], bmpinfo['bmWidth'], 4)
+        
+        win32gui.DeleteObject(saveBitMap.GetHandle())
+        saveDC.DeleteDC()
+        mfcDC.DeleteDC()
+        win32gui.ReleaseDC(hwnd, hwndDC)
+
+        return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+    except Exception as e:
+        return None
+
+def find_image_in_hwnd(hwnd, template_name, threshold=0.75):
+    img = capture_window(hwnd)
+    if img is None:
+        return None
+        
+    template_path = os.path.join(image_dir, template_name)
+    template = cv2.imread(template_path)
+    if template is None:
+        return None
+        
+    res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
+    _, max_val, _, max_loc = cv2.minMaxLoc(res)
+    
+    if max_val >= threshold:
+        h, w = template.shape[:2]
+        center_x = max_loc[0] + w // 2
+        center_y = max_loc[1] + h // 2
+        return (center_x, center_y)
+    
+    return None
+
+def set_main_window():
+    global main_hwnd, alt_hwnds
+    print("\n[!] Please click on your MAIN Roblox window to focus it, then press F1.")
+    while not keyboard.is_pressed('F1'):
+        time.sleep(0.1)
+        
+    main_hwnd = win32gui.GetForegroundWindow()
+    if win32gui.GetWindowText(main_hwnd) != "Roblox":
+        print("[ERROR] The active window is not named 'Roblox'. Please try again.")
+        main_hwnd = None
+        return False
+        
+    all_hwnds = get_roblox_hwnds()
+    alt_hwnds = [h for h in all_hwnds if h != main_hwnd]
+    
+    print(f"\n[+] Main Locked! (HWND: {main_hwnd})")
+    print(f"[+] Detected {len(alt_hwnds)} Alts.")
+    time.sleep(1)
+    
+    print("\n[+] Setup Complete.")
+    return True
+
+def click_in_hwnd(hwnd, coords, double_click=False):
+    screen_x, screen_y = win32gui.ClientToScreen(hwnd, (int(coords[0]), int(coords[1])))
+    pydirectinput.moveTo(screen_x, screen_y)
+    pydirectinput.move(2, 2)
+    pydirectinput.move(-2, -2)
+    
+    if double_click:
+        for _ in range(2):
+            pydirectinput.mouseDown()
+            time.sleep(0.01)
+            pydirectinput.mouseUp()
+            time.sleep(0.01)
+    else:
+        pydirectinput.mouseDown()
+        time.sleep(0.05)
+        pydirectinput.mouseUp()
+
+def spam_q_f():
+    force_foreground(main_hwnd)
+    
+    kb_controller.press(KeyCode.from_char('q'))
+    time.sleep(0.01)
+    kb_controller.release(KeyCode.from_char('q'))
+    
+    time.sleep(0.05)
+    
+    kb_controller.press(KeyCode.from_char('f'))
+    time.sleep(0.01)
+    kb_controller.release(KeyCode.from_char('f'))
+    
+    time.sleep(0.05)
+
 def afk_farm_loop():
     global is_running
     account_states = {}
     phase2_printed = False
+
+    if not main_hwnd:
+        success = set_main_window()
+        if not success:
+            is_running = False
+            return
+            
+    hwnds = [main_hwnd] + alt_hwnds
     
     while is_running:
-        hwnds = get_roblox_hwnds()
-        
-        if not hwnds:
-            print("Status: Waiting for Roblox... (0 detected)")
-            time.sleep(2)
-            continue
-            
         for hwnd in hwnds:
             if hwnd not in account_states: account_states[hwnd] = False
                 
@@ -46,50 +169,35 @@ def afk_farm_loop():
         
         if needs_clearing:
             phase2_printed = False
-            print(f"\n[*] Clearing Popups ({len(needs_clearing)}/{len(hwnds)} accounts need clearing)")
+            print(f"\n[*] Clearing Popups ({len(needs_clearing)}/{len(hwnds)} accs)")
             for hwnd in needs_clearing:
                 if not is_running: break
                 force_foreground(hwnd)
                 time.sleep(0.4) 
                 
-                try:
-                    pyautogui.locateCenterOnScreen(rf'{image_dir}\Playerlist Close.png', confidence=0.90, grayscale=True)
+                if find_image_in_hwnd(hwnd, 'Playerlist Close.png', threshold=0.90):
                     pydirectinput.press('tab')
                     time.sleep(0.1)
-                except pyautogui.ImageNotFoundException: pass
                 
                 timeout = time.time() + 10
                 while time.time() < timeout:
-                    try:
-                        daily_x = pyautogui.locateCenterOnScreen(rf'{image_dir}\Daily Login Close.png', confidence=0.80, grayscale=True)
-                        pydirectinput.moveTo(int(daily_x.x), int(daily_x.y))
-                        pydirectinput.move(2, 2)
-                        time.sleep(0.01)
-                        pydirectinput.move(-2, -2)
-                        time.sleep(0.05)
-                        pydirectinput.mouseDown()
-                        time.sleep(0.05)
-                        pydirectinput.mouseUp()
-                        time.sleep(0.05)
-                        pydirectinput.mouseDown()
-                        time.sleep(0.05)
-                        pydirectinput.mouseUp()
+                    daily_coords = find_image_in_hwnd(hwnd, 'Daily Login Close.png', threshold=0.80)
+                    if daily_coords:
+                        click_in_hwnd(hwnd, daily_coords, double_click=True)
                         time.sleep(0.2)
-                    except pyautogui.ImageNotFoundException:
+                    else:
                         break
                 
                 account_states[hwnd] = True
         else:
-            master_hwnd = hwnds[0]
-            force_foreground(master_hwnd)
+            force_foreground(main_hwnd)
             
             if not phase2_printed:
-                print(f"\nStatus: Waiting for match to end... ({len(hwnds)} accounts waiting)")
+                print(f"\nStatus: Waiting for match end ({len(hwnds)} accs)")
                 phase2_printed = True
                 
-            try:
-                rematch = pyautogui.locateCenterOnScreen(rf'{image_dir}\Rematch Button.png', confidence=0.75, grayscale=True)
-                print("\n[!] Rematch detected, clicking for the next 15 seconds...")
+            if find_image_in_hwnd(main_hwnd, 'Rematch Button.png', threshold=0.75):
+                print("\n[!] Rematch detected. Clicking 15s...")
                 end_time = time.time() + 15
                 rematch_coords = {}
                 
@@ -100,48 +208,38 @@ def afk_farm_loop():
                         
                         if hwnd not in rematch_coords:
                             time.sleep(0.2)
-                            try:
-                                local_rm = pyautogui.locateCenterOnScreen(rf'{image_dir}\Rematch Button.png', confidence=0.75, grayscale=True)
-                                rematch_coords[hwnd] = (local_rm.x, local_rm.y)
-                            except pyautogui.ImageNotFoundException:
+                            local_rm = find_image_in_hwnd(hwnd, 'Rematch Button.png', threshold=0.75)
+                            if local_rm:
+                                rematch_coords[hwnd] = local_rm
+                            else:
                                 continue
                         else:
                             time.sleep(0.05)
                         
                         if hwnd in rematch_coords:
-                            rm_x, rm_y = rematch_coords[hwnd]
-                            pydirectinput.moveTo(int(rm_x), int(rm_y))
-                            pydirectinput.move(2, 2)
-                            pydirectinput.move(-2, -2)
-                            
-                            for _ in range(2):
-                                pydirectinput.mouseDown()
-                                time.sleep(0.01)
-                                pydirectinput.mouseUp()
-                                time.sleep(0.01)
+                            click_in_hwnd(hwnd, rematch_coords[hwnd], double_click=True)
                                     
-                print("\n[*] Loop done, resetting loop.")
+                print("\n[*] Loop done, resetting.")
                 for hwnd in hwnds: account_states[hwnd] = False
-                        
-            except pyautogui.ImageNotFoundException:
-                pass
+            else:
+                spam_q_f()
                 
-        time.sleep(0.5)
+        time.sleep(0.1)
 
 def toggle_macro():
     global is_running
     is_running = not is_running
     
     if is_running:
-        print("\n[+] Holy Grail DUELS. Press CTRL+H to stop it.")
+        print("\n[+] Running. Press CTRL+H to stop.")
         threading.Thread(target=afk_farm_loop, daemon=True).start()
     else:
-        print("\n[-] Macro Stopped.")
+        print("\n[-] Stopped.")
 
 if __name__ == "__main__":
     pydirectinput.FAILSAFE = False
     print("==============================")
-    print("      Holy Grail DUELS V1       ")
+    print("    Holy Grail DUELS V1.1     ")
     print("==============================\n")
     required_images = ["Playerlist Close.png", "Daily Login Close.png", "Rematch Button.png"]
     
@@ -158,7 +256,7 @@ if __name__ == "__main__":
                 print(f"  - {missing}")
             print("Please check the path and try again.\n")
         else:
-            print("\n[+] All images successfully verified!")
+            print("\n[+] All images verified.")
             break
             
     print("\nLooking for images in:", image_dir)
